@@ -14,6 +14,10 @@ env/
 .coverage
 htmlcov/
 
+# MLflow local tracking data
+mlruns/
+mlflow.db
+
 # Streamlit
 .streamlit/secrets.toml
 

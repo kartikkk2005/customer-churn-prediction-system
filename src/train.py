@@ -19,15 +19,19 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearc
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
+import mlflow
+import mlflow.sklearn
 
 from src.data_loader import load_data, prepare_features_target
 from src.preprocessing import add_engineered_features, create_preprocessor
 from src.evaluate import evaluate_model
+from src.quality_gate import MIN_ROC_AUC, check_model_quality
 
 
 def train_and_benchmark(data_path: str = "data/customer_churn.csv", output_dir: str = "models") -> Dict[str, Any]:
     """Train, benchmark, tune hyperparameters, and save best churn prediction models."""
     os.makedirs(output_dir, exist_ok=True)
+    mlflow.set_experiment("customer_churn_prediction")
 
     print(f"Loading raw dataset from {data_path}...")
     df_raw = load_data(data_path)
@@ -98,19 +102,44 @@ def train_and_benchmark(data_path: str = "data/customer_churn.csv", output_dir: 
             scoring="roc_auc",
             n_jobs=-1,
         )
-        grid_search.fit(X_train_trans, y_train)
+        with mlflow.start_run(run_name=name):
+            grid_search.fit(X_train_trans, y_train)
 
-        best_estimator = grid_search.best_estimator_
-        print(f"    Best Params: {grid_search.best_params_}")
-        print(f"    Best CV ROC-AUC: {grid_search.best_score_:.4f}")
+            best_estimator = grid_search.best_estimator_
+            print(f"    Best Params: {grid_search.best_params_}")
+            print(f"    Best CV ROC-AUC: {grid_search.best_score_:.4f}")
 
-        # Test set evaluation
-        y_pred = best_estimator.predict(X_test_trans)
-        y_prob = best_estimator.predict_proba(X_test_trans)[:, 1]
+            # Test set evaluation
+            y_pred = best_estimator.predict(X_test_trans)
+            y_prob = best_estimator.predict_proba(X_test_trans)[:, 1]
 
-        eval_metrics = evaluate_model(y_test.values, y_pred, y_prob)
-        eval_metrics["best_params"] = grid_search.best_params_
-        eval_metrics["cv_roc_auc"] = round(float(grid_search.best_score_), 4)
+            eval_metrics = evaluate_model(y_test.values, y_pred, y_prob)
+            eval_metrics["best_params"] = grid_search.best_params_
+            eval_metrics["cv_roc_auc"] = round(float(grid_search.best_score_), 4)
+
+            mlflow.log_params(grid_search.best_params_)
+            mlflow.log_metrics(
+                {
+                    "cv_roc_auc": eval_metrics["cv_roc_auc"],
+                    "accuracy": eval_metrics["accuracy"],
+                    "precision": eval_metrics["precision"],
+                    "recall": eval_metrics["recall"],
+                    "f1_score": eval_metrics["f1_score"],
+                    "roc_auc": eval_metrics["roc_auc"],
+                }
+            )
+            mlflow.set_tag("model_name", name)
+            # These models are created locally in this training run. MLflow's
+            # skops-based serializer requires explicit trust for tree storage.
+            mlflow.sklearn.log_model(
+                best_estimator,
+                name="model",
+                skops_trusted_types=[
+                    "sklearn.tree._tree.Tree",
+                    "xgboost.core.Booster",
+                    "xgboost.sklearn.XGBClassifier",
+                ],
+            )
 
         results[name] = eval_metrics
 
@@ -123,6 +152,9 @@ def train_and_benchmark(data_path: str = "data/customer_churn.csv", output_dir: 
             best_overall_score = eval_metrics["roc_auc"]
             best_overall_name = name
             best_overall_model = best_estimator
+
+    # Accept the winner before writing the production model artifact.
+    check_model_quality(best_overall_score, MIN_ROC_AUC)
 
     # Save best overall model
     best_model_path = os.path.join(output_dir, "best_model.joblib")

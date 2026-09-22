@@ -19,7 +19,7 @@ An end-to-end machine learning pipeline built to predict customer churn from his
   - **Real-Time Risk Calculator**: Dynamic profile inputs, churn probability gauge, risk level indicator (🟢 Low, 🟡 Medium, 🔴 High), and automated business retention recommendations.
   - **Benchmark Analytics**: Interactive Plotly ROC curves, metric comparison charts, and confusion matrix visualizers.
   - **Batch Prediction Engine**: Drag-and-drop customer CSV dataset uploader with instant downloadable prediction reports.
-- **Production Ready**: Full unit test coverage with `pytest`, clean module separation (`src/`), and serialized model artifacts (`joblib`).
+- **Reusable ML Workflow**: Unit tests with `pytest`, clean module separation (`src/`), and serialized model artifacts (`joblib`).
 
 ---
 
@@ -56,12 +56,14 @@ github_project/
 │   ├── preprocessing.py        # Feature engineering & ColumnTransformer
 │   ├── train.py                # GridSearchCV & CV model training engine
 │   ├── evaluate.py             # Classification evaluation metric suite
+│   ├── quality_gate.py          # Minimum ROC-AUC acceptance check
 │   └── predict.py              # Single & batch inference interface
 ├── tests/
 │   ├── test_preprocessing.py   # Pytest suite for feature pipeline
 │   └── test_model.py           # Pytest suite for inference engine
 ├── app.py                      # Interactive Streamlit Web Application
 ├── requirements.txt            # Project dependencies
+├── .github/workflows/ci.yml    # Automated test workflow
 ├── .gitignore                  # Git exclusion rules
 ├── LICENSE                     # MIT License
 └── README.md                   # Project documentation
@@ -69,42 +71,73 @@ github_project/
 
 ---
 
-## 🚀 Quick Start Guide
+## MLOps
 
-### 1. Prerequisites & Installation
+### MLflow
 
-Clone the repository and install dependencies:
+The training script creates one MLflow run for each tuned model. It records the model name, best hyperparameters, cross-validation ROC-AUC, test metrics, and the trained estimator artifact. MLflow uses a local `mlruns/` folder by default, so no cloud service is required.
+
+### Model Quality Gate
+
+After the three models are evaluated, the best test ROC-AUC is checked against `MIN_ROC_AUC` in `src/quality_gate.py`. The current threshold is `0.80`, which accepts the existing model performance. If the winner is below the threshold, training raises a clear error before saving `best_model.joblib`.
+
+### GitHub Actions
+
+The workflow in `.github/workflows/ci.yml` installs the requirements and runs `pytest tests/` on every push and pull request. It does not retrain the models during CI.
+
+## How to Run
+
+### 1. Create and activate a virtual environment
+
+Windows PowerShell:
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/customer-churn-prediction-system.git
-cd customer-churn-prediction-system
+python -m venv venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\venv\Scripts\Activate.ps1
+```
 
-# Install Python requirements
+macOS/Linux:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 2. Install requirements
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Generate Dataset & Train ML Models
-
-To generate the historical customer dataset and run hyperparameter tuning across all classifiers:
-
-```bash
-# Generate synthetic dataset
-python data/generate_data.py
-
-# Train models & benchmark performance
-python src/train.py
-```
-
-### 3. Run Automated Tests
-
-Execute the pytest suite to verify preprocessing and inference logic:
+### 3. Run tests
 
 ```bash
 pytest tests/
 ```
 
-### 4. Launch Streamlit Web Dashboard
+### 4. Train and track the models
+
+The repository includes the dataset. Generate it again only when you want to reset it:
+
+```bash
+python data/generate_data.py
+python src/train.py
+```
+
+Training saves `models/best_model.joblib`, `models/preprocessor.joblib`, and `models/model_metrics.json` after the quality gate passes.
+
+### 5. Open the MLflow UI
+
+In a second terminal, from the repository root, run:
+
+```bash
+mlflow ui
+```
+
+Then open `http://127.0.0.1:5000` and select the `customer_churn_prediction` experiment. Use `mlflow ui --port 5001` if port 5000 is already in use.
+
+### 6. Run the prediction application
 
 Start the interactive dashboard locally:
 

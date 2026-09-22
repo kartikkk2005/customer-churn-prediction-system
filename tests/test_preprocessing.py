@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.data_loader import prepare_features_target, validate_schema
 from src.preprocessing import add_engineered_features, create_preprocessor
+from src.quality_gate import check_model_quality
 
 
 @pytest.fixture
@@ -102,3 +103,14 @@ def test_preprocessor_transform(sample_raw_dataframe):
 
     assert X_trans.shape[0] == 2
     assert X_trans.shape[1] > 10  # Transformed features count
+
+
+def test_quality_gate_accepts_model_at_threshold():
+    """A model at the configured threshold is accepted."""
+    check_model_quality(0.80)
+
+
+def test_quality_gate_rejects_model_below_threshold():
+    """A model below the configured threshold is rejected clearly."""
+    with pytest.raises(ValueError, match="quality gate failed"):
+        check_model_quality(0.79)
